@@ -7,24 +7,26 @@ from api import redeem_gift_code
 from logger import log
 
 
-def load_accounts(csv_path: str):
+def load_players(csv_path: Path):
     """
-    Read accounts.csv
+    Read players.csv
 
-    Support:
-
-    fid,kid
-    fid,kid,name
+    Supported formats:
+        fid,kid
+        fid,kid,name
     """
 
-    accounts = []
+    players = []
     seen = set()
 
     with open(csv_path, newline="", encoding="utf-8-sig") as f:
+
         reader = csv.DictReader(f)
 
-        if "fid" not in reader.fieldnames or "kid" not in reader.fieldnames:
-            raise ValueError("CSV must contain fid and kid columns.")
+        required = {"fid", "kid"}
+
+        if not required.issubset(reader.fieldnames):
+            raise ValueError("players.csv must contain 'fid' and 'kid' columns.")
 
         for row in reader:
 
@@ -43,29 +45,28 @@ def load_accounts(csv_path: str):
 
             seen.add(fid)
 
-            accounts.append({
+            players.append({
                 "fid": fid,
                 "kid": kid,
-                "name": name
+                "name": name,
             })
 
-    return accounts
+    return players
 
 
-def print_summary(result_counter, elapsed):
+def print_summary(counter, elapsed):
 
     log("")
     log("=" * 60)
-
     log("Finished")
+    log("")
 
-    log(f"SUCCESS  : {result_counter.get('SUCCESS',0)}")
-    log(f"RECEIVED : {result_counter.get('RECEIVED',0)}")
-    log(f"FAILED   : {result_counter.get('FAILED',0)}")
+    log(f"SUCCESS  : {counter['SUCCESS']}")
+    log(f"RECEIVED : {counter['RECEIVED']}")
+    log(f"FAILED   : {counter['FAILED']}")
 
     log("")
     log(f"Elapsed : {elapsed:.1f} sec")
-
     log("=" * 60)
 
 
@@ -73,52 +74,47 @@ def main():
 
     if len(sys.argv) != 2:
 
-        print()
-
         print("Usage:")
         print("python redeem.py FB4Million")
-
         sys.exit(1)
 
     gift_code = sys.argv[1]
 
-    csv_file = Path("data/accounts.csv")
+    csv_file = Path("data/players.csv")
 
     if not csv_file.exists():
 
-        print("accounts.csv not found.")
-
+        print("players.csv not found.")
         sys.exit(1)
 
-    accounts = load_accounts(csv_file)
+    players = load_players(csv_file)
 
-    log(f"Loaded {len(accounts)} accounts.")
+    log(f"Loaded {len(players)} players.")
     log("")
 
     counter = {
         "SUCCESS": 0,
         "RECEIVED": 0,
-        "FAILED": 0
+        "FAILED": 0,
     }
 
     start = time.time()
 
-    total = len(accounts)
+    total = len(players)
 
-    for index, account in enumerate(accounts, start=1):
+    for index, player in enumerate(players, start=1):
 
-        fid = account["fid"]
-        kid = account["kid"]
-        name = account["name"]
+        display_name = player["name"] or player["fid"]
 
-        display = name if name else fid
-
-        log(f"[{index}/{total}] {display}")
+        log(
+            f"[{index}/{total}] "
+            f"{display_name} "
+            f"(FID={player['fid']}, KID={player['kid']})"
+        )
 
         result = redeem_gift_code(
-            fid=fid,
-            kid=kid,
-            cdk=gift_code
+            player=player,
+            cdk=gift_code,
         )
 
         msg = result.get("msg", "FAILED").replace(".", "")
