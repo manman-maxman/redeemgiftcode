@@ -4,7 +4,7 @@ from pathlib import Path
 from logger import error, info, warning
 
 
-CSV_PATH = Path("data/accounts.csv")
+CSV_PATH = Path("data/players.csv")
 
 
 def load_accounts():
