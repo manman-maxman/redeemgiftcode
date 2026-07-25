@@ -1,9 +1,15 @@
 BASE_URL = "https://wos-giftcode-api.centurygame.com"
 
-REDEEM_URL = BASE_URL + "/api/gift_code"
+REDEEM_URL = f"{BASE_URL}/api/gift_code"
 
 WOS_ENCRYPT_KEY = "tB87#kPtkxqOS2"
 
 MAX_RETRIES = 3
-
 RETRY_DELAY = 2
+REQUEST_TIMEOUT = 15
+
+MIN_DELAY = 0.8
+MAX_DELAY = 1.3
+
+CHROME_MIN_VERSION = 148
+CHROME_MAX_VERSION = 150
