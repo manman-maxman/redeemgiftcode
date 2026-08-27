@@ -1,95 +1,92 @@
-import csv
 import sys
 import time
-from pathlib import Path
+import random
 
 from api import redeem_gift_code
+from csv_reader import load_players
+from config import MIN_DELAY, MAX_DELAY
 from logger import log
 
 
-def load_players(csv_path: Path):
-    """
-    Read players.csv
+def print_summary(counter, total, elapsed, gift_code):
+    """Print final redemption summary."""
 
-    Supported formats:
-        fid,kid
-        fid,kid,name
-    """
-
-    players = []
-    seen = set()
-
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-
-        reader = csv.DictReader(f)
-
-        required = {"fid", "kid"}
-
-        if not required.issubset(reader.fieldnames):
-            raise ValueError("players.csv must contain 'fid' and 'kid' columns.")
-
-        for row in reader:
-
-            fid = row["fid"].strip()
-            kid = row["kid"].strip()
-            name = row.get("name", "").strip()
-
-            if not fid.isdigit():
-                continue
-
-            if not kid.isdigit():
-                continue
-
-            if fid in seen:
-                continue
-
-            seen.add(fid)
-
-            players.append({
-                "fid": fid,
-                "kid": kid,
-                "name": name,
-            })
-
-    return players
-
-
-def print_summary(counter, elapsed):
+    minutes, seconds = divmod(int(elapsed), 60)
 
     log("")
     log("=" * 60)
-    log("Finished")
+    log("Redemption Summary")
+    log("=" * 60)
+
+    log(f"Gift Code : {gift_code}")
+    log(f"Processed : {total}")
     log("")
 
-    log(f"SUCCESS  : {counter['SUCCESS']}")
-    log(f"RECEIVED : {counter['RECEIVED']}")
-    log(f"FAILED   : {counter['FAILED']}")
+    log(f"SUCCESS   : {counter['SUCCESS']}", "SUCCESS")
+    log(f"RECEIVED  : {counter['RECEIVED']}", "WARNING")
+    log(f"FAILED    : {counter['FAILED']}", "ERROR")
 
     log("")
-    log(f"Elapsed : {elapsed:.1f} sec")
+    log(f"Elapsed   : {minutes}m {seconds}s")
     log("=" * 60)
 
 
 def main():
+    # -------------------------------------------------
+    # Command line
+    # -------------------------------------------------
 
     if len(sys.argv) != 2:
-
+        print()
         print("Usage:")
-        print("python redeem.py FB4Million")
+        print("  python redeem.py <gift_code>")
+        print()
+        print("Example:")
+        print("  python redeem.py FB4Million")
         sys.exit(1)
 
-    gift_code = sys.argv[1]
+    gift_code = sys.argv[1].strip()
 
-    csv_file = Path("data/players.csv")
-
-    if not csv_file.exists():
-
-        print("players.csv not found.")
+    if not gift_code:
+        print("Gift code cannot be empty.")
         sys.exit(1)
 
-    players = load_players(csv_file)
+    # -------------------------------------------------
+    # Load players
+    # -------------------------------------------------
 
-    log(f"Loaded {len(players)} players.")
+    try:
+        players = load_players()
+
+    except FileNotFoundError as e:
+        log(str(e), "ERROR")
+        sys.exit(1)
+
+    except ValueError as e:
+        log(str(e), "ERROR")
+        sys.exit(1)
+
+    except Exception as e:
+        log(f"Failed to load players.csv: {e}", "ERROR")
+        sys.exit(1)
+
+    if not players:
+        log("No valid players found in data/players.csv.", "ERROR")
+        sys.exit(1)
+
+    total = len(players)
+
+    # -------------------------------------------------
+    # Start
+    # -------------------------------------------------
+
+    log("")
+    log("=" * 60)
+    log("WOS Gift Code Batch Redeemer")
+    log("=" * 60)
+    log(f"Gift Code : {gift_code}")
+    log(f"Players   : {total}")
+    log("=" * 60)
     log("")
 
     counter = {
@@ -98,43 +95,124 @@ def main():
         "FAILED": 0,
     }
 
-    start = time.time()
+    start_time = time.time()
 
-    total = len(players)
+    # -------------------------------------------------
+    # Redemption loop
+    # -------------------------------------------------
 
-    for index, player in enumerate(players, start=1):
+    try:
+        for index, player in enumerate(players, start=1):
 
-        display_name = player["name"] or player["fid"]
+            fid = player["fid"]
+            kid = player["kid"]
+            name = player.get("name", "")
 
-        log(
-            f"[{index}/{total}] "
-            f"{display_name} "
-            f"(FID={player['fid']}, KID={player['kid']})"
-        )
+            if name:
+                display = f"{name} (FID={fid}, KID={kid})"
+            else:
+                display = f"FID={fid}, KID={kid}"
 
-        result = redeem_gift_code(
-            player=player,
-            cdk=gift_code,
-        )
+            log(f"[{index}/{total}] {display}")
 
-        msg = result.get("msg", "FAILED").replace(".", "")
+            try:
+                result = redeem_gift_code(
+                    player=player,
+                    cdk=gift_code,
+                )
 
-        log(f" -> {msg}")
+            except Exception as e:
+                log(f" -> Unexpected error: {e}", "ERROR")
+                counter["FAILED"] += 1
 
-        if msg == "SUCCESS":
-            counter["SUCCESS"] += 1
+                if index < total:
+                    time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
 
-        elif msg == "RECEIVED":
-            counter["RECEIVED"] += 1
+                continue
 
-        else:
-            counter["FAILED"] += 1
+            # API normally returns a dict.
+            if not isinstance(result, dict):
+                log(f" -> Invalid API response: {result}", "ERROR")
+                counter["FAILED"] += 1
 
-        time.sleep(1)
+            else:
+                raw_msg = str(
+                    result.get("msg", "UNKNOWN")
+                ).strip()
 
-    elapsed = time.time() - start
+                # API sometimes returns "TIME ERROR."
+                msg = raw_msg.rstrip(".").upper()
 
-    print_summary(counter, elapsed)
+                if msg in ("SUCCESS", "SAME TYPE EXCHANGE"):
+                    counter["SUCCESS"] += 1
+                    log(f" -> {msg}", "SUCCESS")
+
+                elif msg == "RECEIVED":
+                    counter["RECEIVED"] += 1
+                    log(" -> ALREADY RECEIVED", "WARNING")
+
+                else:
+                    counter["FAILED"] += 1
+
+                    err_code = result.get("err_code")
+
+                    if err_code is not None:
+                        log(
+                            f" -> {msg} (err_code={err_code})",
+                            "ERROR",
+                        )
+                    else:
+                        log(f" -> {msg}", "ERROR")
+
+                    # Gift code itself is expired.
+                    # No point sending it to another 400 players.
+                    if msg == "TIME ERROR":
+                        log(
+                            "Gift code has expired. Stopping.",
+                            "WARNING",
+                        )
+                        break
+
+                    # Global redemption limit reached.
+                    if msg == "USED":
+                        log(
+                            "Gift code claim limit reached. Stopping.",
+                            "WARNING",
+                        )
+                        break
+
+            # Random delay between players.
+            # Do not sleep after the final player.
+            if index < total:
+                time.sleep(
+                    random.uniform(
+                        MIN_DELAY,
+                        MAX_DELAY,
+                    )
+                )
+
+    except KeyboardInterrupt:
+        log("")
+        log("Stopped by user.", "WARNING")
+
+    # -------------------------------------------------
+    # Summary
+    # -------------------------------------------------
+
+    elapsed = time.time() - start_time
+
+    processed = (
+        counter["SUCCESS"]
+        + counter["RECEIVED"]
+        + counter["FAILED"]
+    )
+
+    print_summary(
+        counter=counter,
+        total=processed,
+        elapsed=elapsed,
+        gift_code=gift_code,
+    )
 
 
 if __name__ == "__main__":
