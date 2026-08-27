@@ -1,63 +1,231 @@
 import csv
 from pathlib import Path
 
-from logger import error, info, warning
+from logger import log
 
 
-CSV_PATH = Path("data/players.csv")
+# -------------------------------------------------
+# CSV Configuration
+# -------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent
+CSV_PATH = BASE_DIR / "data" / "players.csv"
 
 
-def load_accounts():
+def load_players():
     """
-    Read accounts from data/accounts.csv
+    Load players from data/players.csv.
+
+    Required columns:
+        fid,kid
+
+    Optional column:
+        name
+
+    Example:
+        fid,kid,name
+        12087362,265,Main
+        22156300,273,Farm01
+        26666459,281,
 
     Returns:
         list[dict]
+
+    Example:
+        [
+            {
+                "fid": "12087362",
+                "kid": "265",
+                "name": "Main"
+            }
+        ]
     """
 
+    # -------------------------------------------------
+    # Check file
+    # -------------------------------------------------
+
     if not CSV_PATH.exists():
-        raise FileNotFoundError(f"Cannot find {CSV_PATH}")
+        raise FileNotFoundError(
+            f"players.csv not found: {CSV_PATH}"
+        )
 
-    accounts = []
-    seen = set()
+    if not CSV_PATH.is_file():
+        raise FileNotFoundError(
+            f"players.csv is not a valid file: {CSV_PATH}"
+        )
 
-    with open(CSV_PATH, newline="", encoding="utf-8-sig") as f:
+    players = []
+    seen_fids = set()
 
-        reader = csv.DictReader(f)
+    invalid_count = 0
+    duplicate_count = 0
 
-        required = {"fid", "kid"}
+    # -------------------------------------------------
+    # Read CSV
+    # -------------------------------------------------
 
-        if not required.issubset(reader.fieldnames):
-            raise ValueError(
-                "accounts.csv must contain columns: fid,kid"
+    try:
+        with CSV_PATH.open(
+            mode="r",
+            newline="",
+            encoding="utf-8-sig",
+        ) as f:
+
+            reader = csv.DictReader(f)
+
+            # Empty CSV
+            if reader.fieldnames is None:
+                raise ValueError(
+                    "players.csv is empty or has no header."
+                )
+
+            # Normalize header names
+            reader.fieldnames = [
+                field.strip().lower()
+                for field in reader.fieldnames
+                if field is not None
+            ]
+
+            required_columns = {"fid", "kid"}
+
+            missing_columns = (
+                required_columns - set(reader.fieldnames)
             )
 
-        for row_number, row in enumerate(reader, start=2):
+            if missing_columns:
+                missing = ", ".join(sorted(missing_columns))
 
-            fid = row["fid"].strip()
-            kid = row["kid"].strip()
-            name = row.get("name", "").strip()
+                raise ValueError(
+                    f"players.csv is missing required column(s): "
+                    f"{missing}"
+                )
 
-            if not fid.isdigit():
-                warning(f"Row {row_number}: Invalid FID -> {fid}")
-                continue
+            # -------------------------------------------------
+            # Process rows
+            # -------------------------------------------------
 
-            if not kid.isdigit():
-                warning(f"Row {row_number}: Invalid KID -> {kid}")
-                continue
+            for row_number, row in enumerate(reader, start=2):
 
-            if fid in seen:
-                warning(f"Duplicate FID ignored -> {fid}")
-                continue
+                # Ignore completely empty rows
+                if not row:
+                    continue
 
-            seen.add(fid)
+                fid = str(row.get("fid") or "").strip()
+                kid = str(row.get("kid") or "").strip()
+                name = str(row.get("name") or "").strip()
 
-            accounts.append({
-                "fid": fid,
-                "kid": kid,
-                "name": name
-            })
+                # Ignore completely blank lines
+                if not fid and not kid and not name:
+                    continue
 
-    info(f"Loaded {len(accounts)} account(s).")
+                # ---------------------------------------------
+                # Validate FID
+                # ---------------------------------------------
 
-    return accounts
+                if not fid:
+                    log(
+                        f"Row {row_number}: Missing FID. Skipped.",
+                        "WARNING",
+                    )
+                    invalid_count += 1
+                    continue
+
+                if not fid.isdigit():
+                    log(
+                        f"Row {row_number}: "
+                        f"Invalid FID '{fid}'. Skipped.",
+                        "WARNING",
+                    )
+                    invalid_count += 1
+                    continue
+
+                # ---------------------------------------------
+                # Validate KID
+                # ---------------------------------------------
+
+                if not kid:
+                    log(
+                        f"Row {row_number}: "
+                        f"Missing KID for FID {fid}. Skipped.",
+                        "WARNING",
+                    )
+                    invalid_count += 1
+                    continue
+
+                if not kid.isdigit():
+                    log(
+                        f"Row {row_number}: "
+                        f"Invalid KID '{kid}' "
+                        f"for FID {fid}. Skipped.",
+                        "WARNING",
+                    )
+                    invalid_count += 1
+                    continue
+
+                # ---------------------------------------------
+                # Duplicate FID
+                # ---------------------------------------------
+
+                if fid in seen_fids:
+                    log(
+                        f"Row {row_number}: "
+                        f"Duplicate FID {fid}. Skipped.",
+                        "WARNING",
+                    )
+                    duplicate_count += 1
+                    continue
+
+                seen_fids.add(fid)
+
+                # ---------------------------------------------
+                # Add player
+                # ---------------------------------------------
+
+                players.append(
+                    {
+                        "fid": fid,
+                        "kid": kid,
+                        "name": name,
+                    }
+                )
+
+    except UnicodeDecodeError as e:
+        raise ValueError(
+            "Unable to read players.csv. "
+            "Please save it as UTF-8 CSV."
+        ) from e
+
+    except csv.Error as e:
+        raise ValueError(
+            f"Invalid CSV format: {e}"
+        ) from e
+
+    # -------------------------------------------------
+    # Final validation
+    # -------------------------------------------------
+
+    if not players:
+        raise ValueError(
+            "No valid players found in players.csv."
+        )
+
+    # -------------------------------------------------
+    # Summary
+    # -------------------------------------------------
+
+    log(f"Loaded {len(players)} valid player(s).")
+
+    if duplicate_count:
+        log(
+            f"Ignored {duplicate_count} duplicate FID(s).",
+            "WARNING",
+        )
+
+    if invalid_count:
+        log(
+            f"Ignored {invalid_count} invalid row(s).",
+            "WARNING",
+        )
+
+    return players
