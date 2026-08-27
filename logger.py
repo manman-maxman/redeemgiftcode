@@ -1,39 +1,74 @@
 from datetime import datetime
-from colorama import Fore, Style, init
 
-# Enable ANSI color on Windows
-init(autoreset=True)
+try:
+    import colorama
+    from colorama import Fore, Style
+
+    colorama.init(autoreset=True)
+
+    COLORS = {
+        "INFO": Fore.CYAN,
+        "SUCCESS": Fore.GREEN,
+        "WARNING": Fore.YELLOW,
+        "ERROR": Fore.RED,
+    }
+
+    RESET = Style.RESET_ALL
+    DIM = Style.DIM
+
+except ImportError:
+    COLORS = {
+        "INFO": "",
+        "SUCCESS": "",
+        "WARNING": "",
+        "ERROR": "",
+    }
+
+    RESET = ""
+    DIM = ""
 
 
-LEVEL_COLOR = {
-    "INFO": Fore.CYAN,
-    "SUCCESS": Fore.GREEN,
-    "WARNING": Fore.YELLOW,
-    "ERROR": Fore.RED,
-    "DEBUG": Fore.MAGENTA,
-}
-
-
-def log(message: str, level: str = "INFO") -> None:
+def log(message="", level="INFO"):
     """
-    Print timestamped log message.
+    Print a timestamped log message.
 
-    Example:
-        log("Loaded 478 accounts")
+    Supported levels:
+        INFO
+        SUCCESS
+        WARNING
+        ERROR
+
+    Examples:
+        log("Starting...")
         log("Redeemed successfully", "SUCCESS")
-        log("Network timeout", "WARNING")
-        log("Invalid sign", "ERROR")
+        log("Rate limited", "WARNING")
+        log("Request failed", "ERROR")
     """
 
-    level = level.upper()
+    level = str(level).upper()
 
-    color = LEVEL_COLOR.get(level, Fore.WHITE)
+    if level not in COLORS:
+        level = "INFO"
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    print(
-        f"{color}[{timestamp}] "
-        f"[{level}] "
-        f"{message}"
-        f"{Style.RESET_ALL}"
+    color = COLORS[level]
+
+    output = (
+        f"{DIM}{timestamp}{RESET}"
+        f" - "
+        f"{color}{message}{RESET}"
     )
+
+    try:
+        print(output, flush=True)
+
+    except UnicodeEncodeError:
+        # Fallback for terminals with poor Unicode support
+        safe_output = (
+            output
+            .encode("ascii", errors="replace")
+            .decode("ascii")
+        )
+
+        print(safe_output, flush=True)
